@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Escáner Quirófanos - Federico</title>
+    <!-- Librería de escaneo QR -->
+    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; background-color: #f4f7f6; margin: 0; padding: 20px; }
+        h2 { color: #2c3e50; }
+        #reader { width: 100%; max-width: 400px; margin: 0 auto; border: 2px solid #3498db; border-radius: 8px; background: white; }
+        .controles { margin-bottom: 20px; }
+        select { padding: 12px; font-size: 16px; border-radius: 5px; width: 100%; max-width: 300px; border: 1px solid #ccc; }
+        #mensaje { margin-top: 20px; font-weight: bold; font-size: 18px; color: #2c3e50; min-height: 30px; }
+    </style>
+</head>
+<body>
+
+    <h2>Trazabilidad Quirúrgica</h2>
+    
+    <div class="controles">
+        <label for="estado"><strong>Seleccione el Hito:</strong></label><br><br>
+        <select id="estado">
+            <option value="1_Ingreso">1. Ingreso / Llamado</option>
+            <option value="2_Pre_Anestesia">2. Pre-Anestesia</option>
+            <option value="3_Inicio_Cirugia">3. Inició Cirugía</option>
+            <option value="4_Recuperacion">4. Recuperación</option>
+            <option value="5_Traslado_Piso">5. Traslado a piso</option>
+        </select>
+    </div>
+
+    <div id="reader"></div>
+    <div id="mensaje">Cargando cámara...</div>
+
+    <!-- Sonido de confirmación -->
+    <audio id="beep" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" preload="auto"></audio>
+
+    <script>
+        // La URL que me acabas de enviar
+        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyLyxG23Ovo11cAT6cfQ9zfs204Vb4-MvlmIj2JO0Gyufqci-iS_-QRImpb5DQTq56OKg/exec";
+        
+        let escaneando = true;
+
+        function onScanSuccess(decodedText, decodedResult) {
+            if (!escaneando) return;
+            escaneando = false; 
+
+            // Pitido de confirmación
+            document.getElementById('beep').play(); 
+
+            let estadoSeleccionado = document.getElementById('estado').value;
+            let mensajeDiv = document.getElementById('mensaje');
+            
+            mensajeDiv.innerHTML = `Lanzando escaneo: ${decodedText}...`;
+            mensajeDiv.style.color = "#f39c12";
+
+            // Petición GET directa que no requiere permisos CORS restrictivos
+            let urlFinal = `${GOOGLE_SCRIPT_URL}?qr=${encodeURIComponent(decodedText)}&estado=${encodeURIComponent(estadoSeleccionado)}`;
+
+            fetch(urlFinal)
+                .then(response => response.text())
+                .then(data => {
+                    if (data.trim() === "Exito") {
+                        mensajeDiv.innerHTML = "¡Guardado en Excel exitosamente!";
+                        mensajeDiv.style.color = "#27ae60";
+                    } else {
+                        mensajeDiv.innerHTML = data; // Muestra el mensaje de error del script
+                        mensajeDiv.style.color = "#e74c3c";
+                    }
+
+                    // Reabrir cámara para siguiente escaneo en 3 segundos
+                    setTimeout(() => {
+                        mensajeDiv.innerHTML = "Apunte al código QR...";
+                        mensajeDiv.style.color = "#2c3e50";
+                        escaneando = true;
+                    }, 3000);
+                })
+                .catch(error => {
+                    mensajeDiv.innerHTML = "Error de conexión con la base de datos.";
+                    mensajeDiv.style.color = "#e74c3c";
+                    escaneando = true;
+                });
+        }
+
+        // Iniciar escáner usando cámara trasera preferente
+        let html5QrcodeScanner = new Html5QrcodeScanner(
+            "reader", 
+            { fps: 10, qrbox: {width: 250, height: 250}, facingMode: "environment" }, 
+            false
+        );
+        html5QrcodeScanner.render(onScanSuccess);
+    </script>
+</body>
+</html>
