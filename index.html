@@ -1,95 +1,78 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Escáner Quirófanos - Federico</title>
-    <!-- Librería de escaneo QR -->
-    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
-    <style>
-        body { font-family: Arial, sans-serif; text-align: center; background-color: #f4f7f6; margin: 0; padding: 20px; }
-        h2 { color: #2c3e50; }
-        #reader { width: 100%; max-width: 400px; margin: 0 auto; border: 2px solid #3498db; border-radius: 8px; background: white; }
-        .controles { margin-bottom: 20px; }
-        select { padding: 12px; font-size: 16px; border-radius: 5px; width: 100%; max-width: 300px; border: 1px solid #ccc; }
-        #mensaje { margin-top: 20px; font-weight: bold; font-size: 18px; color: #2c3e50; min-height: 30px; }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Escáner quirúrgico</title>
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <style>
+    :root{--blue:#007bb5;--green:#099667;--orange:#e58b00;--red:#c93636;--ink:#253848;--bg:#edf4f7}*{box-sizing:border-box}body{font-family:Arial,sans-serif;margin:0;padding:20px;background:linear-gradient(135deg,#edf4f7,#dcecf3);color:var(--ink);min-height:100vh}.app{max-width:480px;margin:auto;background:#fff;padding:22px;border-radius:16px;box-shadow:0 7px 25px #17516b26}h1{font-size:22px;color:var(--blue);margin:0 0 6px;text-align:center}p{color:#5d7484;text-align:center;margin:0 0 20px;line-height:1.4}label{display:block;font-size:13px;font-weight:bold;color:#446072;margin:14px 0 6px}select,input,button{font:inherit;border-radius:8px;width:100%;padding:13px}select,input{border:1px solid #c3d5de;background:#fff}button{border:0;font-weight:bold;cursor:pointer;margin-top:14px}.primary{background:var(--blue);color:#fff}.secondary{background:#e7f4fa;color:#006b9f}.hidden{display:none}#reader{width:100%;margin:18px auto 0;border:2px solid #8bc5dc;border-radius:10px;overflow:hidden;background:white}#message{min-height:48px;margin-top:18px;text-align:center;font-weight:bold;line-height:1.4}.ok{color:var(--green)}.error{color:var(--red)}.warn{color:var(--orange)}.step{padding:10px;border-left:5px solid var(--blue);background:#f7fbfd;border-radius:5px;margin:8px 0;font-size:13px}.step b{display:block}.hint{font-size:12px;color:#68808e;text-align:left;margin-top:14px}.footer{font-size:11px;color:#8093a0;margin:18px 0 0;text-align:center}@media(max-width:400px){body{padding:10px}.app{padding:16px}}
+  </style>
 </head>
 <body>
+  <main class="app">
+    <h1>Escáner quirúrgico</h1>
+    <p>Seleccione el paso y escanee la manilla. La hora queda registrada automáticamente.</p>
 
-    <h2>Trazabilidad Quirúrgica</h2>
-    
-    <div class="controles">
-        <label for="estado"><strong>Seleccione el Hito:</strong></label><br><br>
-        <select id="estado">
-            <option value="1_Ingreso">1. Ingreso / Llamado</option>
-            <option value="2_Pre_Anestesia">2. Pre-Anestesia</option>
-            <option value="3_Inicio_Cirugia">3. Inició Cirugía</option>
-            <option value="4_Recuperacion">4. Recuperación</option>
-            <option value="5_Traslado_Piso">5. Traslado a piso</option>
-        </select>
-    </div>
+    <div class="step"><b>1. Preparación</b>Al recibir al paciente.</div>
+    <div class="step" style="border-color:var(--orange)"><b>2. Entrada a quirófano</b>Inicia el tiempo de uso de la sala.</div>
+    <div class="step" style="border-color:var(--green)"><b>3. Recuperación</b>Registra la salida y libera el quirófano.</div>
 
-    <div id="reader"></div>
-    <div id="mensaje">Cargando cámara...</div>
+    <label for="station">Paso que va a registrar</label>
+    <select id="station" onchange="showRoom()">
+      <option value="PREPARACION">1. Preparación</option>
+      <option value="QUIROFANO">2. Entrada a quirófano</option>
+      <option value="RECUPERACION">3. Recuperación / salida de QF</option>
+    </select>
+    <div id="room-wrap" class="hidden"><label for="room">Quirófano real</label><input id="room" autocomplete="off" placeholder="Ej. SAS 1 Torre 3"></div>
+    <label for="operator">Auxiliar / operador (opcional)</label>
+    <input id="operator" autocomplete="name" placeholder="Nombre de quien escanea">
 
-    <!-- Sonido de confirmación -->
-    <audio id="beep" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" preload="auto"></audio>
-
-    <script>
-        // La URL que me acabas de enviar
-        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyLyxG23Ovo11cAT6cfQ9zfs204Vb4-MvlmIj2JO0Gyufqci-iS_-QRImpb5DQTq56OKg/exec";
-        
-        let escaneando = true;
-
-        function onScanSuccess(decodedText, decodedResult) {
-            if (!escaneando) return;
-            escaneando = false; 
-
-            // Pitido de confirmación
-            document.getElementById('beep').play(); 
-
-            let estadoSeleccionado = document.getElementById('estado').value;
-            let mensajeDiv = document.getElementById('mensaje');
-            
-            mensajeDiv.innerHTML = `Lanzando escaneo: ${decodedText}...`;
-            mensajeDiv.style.color = "#f39c12";
-
-            // Petición GET directa que no requiere permisos CORS restrictivos
-            let urlFinal = `${GOOGLE_SCRIPT_URL}?qr=${encodeURIComponent(decodedText)}&estado=${encodeURIComponent(estadoSeleccionado)}`;
-
-            fetch(urlFinal)
-                .then(response => response.text())
-                .then(data => {
-                    if (data.trim() === "Exito") {
-                        mensajeDiv.innerHTML = "¡Guardado en Excel exitosamente!";
-                        mensajeDiv.style.color = "#27ae60";
-                    } else {
-                        mensajeDiv.innerHTML = data; // Muestra el mensaje de error del script
-                        mensajeDiv.style.color = "#e74c3c";
-                    }
-
-                    // Reabrir cámara para siguiente escaneo en 3 segundos
-                    setTimeout(() => {
-                        mensajeDiv.innerHTML = "Apunte al código QR...";
-                        mensajeDiv.style.color = "#2c3e50";
-                        escaneando = true;
-                    }, 3000);
-                })
-                .catch(error => {
-                    mensajeDiv.innerHTML = "Error de conexión con la base de datos.";
-                    mensajeDiv.style.color = "#e74c3c";
-                    escaneando = true;
-                });
-        }
-
-        // Iniciar escáner usando cámara trasera preferente
-        let html5QrcodeScanner = new Html5QrcodeScanner(
-            "reader", 
-            { fps: 10, qrbox: {width: 250, height: 250}, facingMode: "environment" }, 
-            false
-        );
-        html5QrcodeScanner.render(onScanSuccess);
-    </script>
+    <button id="camera-button" class="primary" onclick="startCamera()">Activar cámara y escanear</button>
+    <button class="secondary" onclick="toggleManual()">Usar lector físico / escribir código</button>
+    <div id="manual" class="hidden"><label for="manual-code">Código de la manilla</label><input id="manual-code" autocomplete="off" placeholder="Escanee aquí con el lector"><button class="primary" onclick="sendManual()">Registrar lectura</button></div>
+    <div id="reader" class="hidden"></div>
+    <div id="message" class="warn">Toque “Activar cámara” para solicitar permiso.</div>
+    <p class="hint">Si el navegador bloqueó la cámara antes: abra el candado de la barra de dirección → Permisos → Cámara → Permitir; luego recargue esta página.</p>
+    <div class="footer">Trazabilidad quirúrgica - QR de manilla</div>
+  </main>
+  <audio id="beep" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" preload="auto"></audio>
+  <script>
+    const GOOGLE_SCRIPT_URL='https://script.google.com/macros/s/AKfycbyLyxG23Ovo11cAT6cfQ9zfs204Vb4-MvlmIj2JO0Gyufqci-iS_-QRImpb5DQTq56OKg/exec';
+    let scanner=null, running=false, sending=false;
+    const el=id=>document.getElementById(id);
+    function message(text,type){let box=el('message');box.textContent=text;box.className=type||''}
+    function showRoom(){el('room-wrap').classList.toggle('hidden',el('station').value!=='QUIROFANO')}
+    function toggleManual(){el('manual').classList.toggle('hidden');if(!el('manual').classList.contains('hidden'))el('manual-code').focus()}
+    function stationValue(){let step=el('station').value;if(step!=='QUIROFANO')return step;let room=el('room').value.trim();if(!room){message('Escriba el nombre real del quirófano antes de escanear.','error');return null}return 'QF:'+room}
+    function startCamera(){
+      if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){message('Este navegador no permite cámara. Use Chrome actualizado o el lector físico.','error');return}
+      if(!stationValue())return;
+      el('reader').classList.remove('hidden'); message('Solicitando cámara trasera…','warn');
+      if(scanner&&running)return;
+      scanner=new Html5Qrcode('reader');
+      const success=code=>{if(!sending)sendCode(code)};
+      scanner.start({facingMode:{exact:'environment'}},{fps:10,qrbox:{width:230,height:230}},success,()=>{}).then(()=>{running=true;message('Apunte al código QR de la manilla.','warn')}).catch(()=>{
+        scanner.start({facingMode:'environment'},{fps:10,qrbox:{width:230,height:230}},success,()=>{}).then(()=>{running=true;message('Apunte al código QR de la manilla.','warn')}).catch(error=>{
+          let denied=String(error).includes('NotAllowedError')||String(error).toLowerCase().includes('permission');
+          message(denied?'La cámara fue bloqueada. Permítala en el candado de la dirección y recargue.':'No se pudo abrir la cámara: '+error,'error');
+        });
+      });
+    }
+    function sendManual(){let code=el('manual-code').value.trim();if(code)sendCode(code);else message('Escanee o escriba el código de la manilla.','error')}
+    function sendCode(code){
+      let station=stationValue();if(!station||sending)return;sending=true;
+      if(scanner&&running){scanner.pause(true)}
+      el('beep').play().catch(()=>{});message('Registrando lectura…','warn');
+      const url=GOOGLE_SCRIPT_URL+'?qr='+encodeURIComponent(code)+'&estacion='+encodeURIComponent(station)+'&operador='+encodeURIComponent(el('operator').value.trim()||'Lector móvil');
+      fetch(url).then(r=>r.text()).then(text=>{
+        let result;try{result=JSON.parse(text)}catch(_){result={ok:false,mensaje:text}}
+        if(result.ok){message('✓ '+result.mensaje+' '+(result.hora?'Hora: '+result.hora:''),'ok');el('manual-code').value=''}
+        else message(result.mensaje||'No fue posible registrar la lectura.','error');
+      }).catch(()=>message('Error de conexión con la base de datos. Revise Internet e intente otra vez.','error')).finally(()=>{
+        setTimeout(()=>{sending=false;if(scanner&&running){scanner.resume().catch(()=>{})}},2200);
+      });
+    }
+  </script>
 </body>
 </html>
