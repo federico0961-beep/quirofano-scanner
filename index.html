@@ -24,7 +24,6 @@
       <option value="QUIROFANO">2. Entrada a quirófano</option>
       <option value="RECUPERACION">3. Recuperación / salida de QF</option>
     </select>
-    <div id="room-wrap" class="hidden"><label for="room">Quirófano real</label><input id="room" autocomplete="off" placeholder="Ej. SAS 1 Torre 3"></div>
     <label for="operator">Auxiliar / operador (opcional)</label>
     <input id="operator" autocomplete="name" placeholder="Nombre de quien escanea">
 
@@ -42,9 +41,10 @@
     let scanner=null, running=false, sending=false;
     const el=id=>document.getElementById(id);
     function message(text,type){let box=el('message');box.textContent=text;box.className=type||''}
-    function showRoom(){el('room-wrap').classList.toggle('hidden',el('station').value!=='QUIROFANO')}
+    function showRoom(){}
     function toggleManual(){el('manual').classList.toggle('hidden');if(!el('manual').classList.contains('hidden'))el('manual-code').focus()}
-    function stationValue(){let step=el('station').value;if(step!=='QUIROFANO')return step;let room=el('room').value.trim();if(!room){message('Escriba el nombre real del quirófano antes de escanear.','error');return null}return 'QF:'+room}
+    /* En el segundo paso Apps Script toma automáticamente el quirófano programado del paciente. */
+    function stationValue(){return el('station').value}
     function startCamera(){
       if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){message('Este navegador no permite cámara. Use Chrome actualizado o el lector físico.','error');return}
       if(!stationValue())return;
