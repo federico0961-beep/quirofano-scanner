@@ -13,7 +13,7 @@
 <body>
   <main class="app">
     <h1>Escáner quirúrgico</h1>
-    <div class="version">Versión USB-3 · Pistola + celular + manual</div>
+    <div class="version">Versión USB-4 · Pistola + celular + manual</div>
     <p>Configure la estación de este lector una vez y escanee la manilla. La hora queda registrada automáticamente.</p>
 
     <div class="step"><b>1. Preparación</b>Primer escaneo: inicia Preparación. Segundo: inicio de profilaxis.</div>
@@ -47,7 +47,8 @@
   <audio id="beep" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" preload="auto"></audio>
   <script>
     const GOOGLE_SCRIPT_URL='https://script.google.com/macros/s/AKfycbyLyxG23Ovo11cAT6cfQ9zfs204Vb4-MvlmIj2JO0Gyufqci-iS_-QRImpb5DQTq56OKg/exec';
-    let scanner=null, running=false, sending=false,lastCode='',lastCodeAt=0;
+    let scanner=null, running=false, lastCode='',lastCodeAt=0,pendingCode='',pendingUntil=0;
+    let sending=false;
     let modoLectura='',cambiandoModo=false,estacionFija=false,salaFija=false;
     const el=id=>document.getElementById(id);
     function message(text,type){let box=el('message');box.textContent=text;box.className=type||''}
@@ -133,9 +134,17 @@
     const esperar=ms=>new Promise(resolve=>setTimeout(resolve,ms));
     const esBloqueo=r=>/base ocupada|candado|bloqueo|espera/i.test(String((r&&r.mensaje)||''));
     async function solicitarRegistro(url){
-      const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);
-      try{let response=await fetch(url,{cache:'no-store',signal:controller.signal});let text=await response.text();try{return JSON.parse(text)}catch(_){return {ok:false,mensaje:text||'La base no devolvió una respuesta válida.'}}}
-      finally{clearTimeout(timer)}
+      const controller=new AbortController(); let agotado=false;
+      const avisoLento=setTimeout(()=>message('Guardando lectura… Espere la confirmación; no escanee esta manilla otra vez.','warn'),9000);
+      const timer=setTimeout(()=>{agotado=true;controller.abort()},45000);
+      try{
+        const response=await fetch(url,{cache:'no-store',signal:controller.signal});
+        const text=await response.text();
+        try{return JSON.parse(text)}catch(_){return {ok:false,mensaje:text||'La base no devolvió una respuesta válida.'}}
+      }catch(error){
+        if(agotado||String(error&&error.name)==='AbortError') return {ok:false,codigo:'RESPUESTA_INCIERTA'};
+        throw error;
+      }finally{clearTimeout(avisoLento);clearTimeout(timer)}
     }
     async function sendCode(code){
       let station=stationValue(),now=Date.now();
@@ -146,6 +155,10 @@
       el('detalle-lectura').textContent=code!==recibido?'Se repuso la barra | después de '+code.slice(0,2)+'. El identificador de la manilla se conserva completo.':'';
       el('detalle-lectura').classList.toggle('hidden',code===recibido);
       if(el('manual-code').value.trim()===recibido)el('manual-code').value=code;
+      if(code===pendingCode&&now<pendingUntil){
+        if(el('manual-code').value.trim()===code)el('manual-code').value='';
+        message('Esta lectura quedó pendiente de confirmar. Revise Seguimiento antes de volver a escanearla.','warn');return;
+      }
       if(code===lastCode&&now-lastCodeAt<3500){
         if(el('manual-code').value.trim()===code)el('manual-code').value='';
         message('Lectura ya enviada. Espere un momento antes de repetirla.','warn');return;
@@ -161,11 +174,17 @@
         let result=null;
         for(let intento=0;intento<3;intento++){
           message(intento?'Base ocupada; reintentando automáticamente…':'Registrando lectura…','warn');
-          try{result=await solicitarRegistro(url)}catch(_){result={ok:false,mensaje:'No fue posible conectar con la base de datos.'}}
+          try{result=await solicitarRegistro(url)}catch(_){result={ok:false,codigo:'RESPUESTA_INCIERTA'}}
           if(result.ok||!esBloqueo(result))break;
           await esperar(1100*(intento+1));
         }
-        if(result&&result.ok){lastCode=code;lastCodeAt=Date.now();message('✓ '+result.mensaje+' '+(result.hora?'Hora: '+result.hora:''),'ok');el('manual-code').value=''}
+        if(result&&result.ok){
+          lastCode=code;lastCodeAt=Date.now();pendingCode='';pendingUntil=0;
+          message('✓ '+result.mensaje+' '+(result.hora?'Hora: '+result.hora:''),'ok');el('manual-code').value='';
+        } else if(result&&result.codigo==='RESPUESTA_INCIERTA'){
+          pendingCode=code;pendingUntil=Date.now()+60000;el('manual-code').value='';
+          message('La lectura fue enviada, pero la base tardó en confirmar. Revise Seguimiento antes de escanear esta misma manilla otra vez.','warn');
+        }
         else message((result&&result.mensaje)||'No fue posible registrar la lectura.','error');
       }finally{
         setTimeout(()=>{
