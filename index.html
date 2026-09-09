@@ -12,18 +12,21 @@
 <body>
   <main class="app">
     <h1>Escáner quirúrgico</h1>
-    <p>Seleccione el paso y escanee la manilla. La hora queda registrada automáticamente.</p>
+    <p>Configure la estación de este lector una vez y escanee la manilla. La hora queda registrada automáticamente.</p>
 
-    <div class="step"><b>1. Preparación</b>Al recibir al paciente.</div>
-    <div class="step" style="border-color:var(--orange)"><b>2. Entrada a quirófano</b>Inicia el tiempo de uso de la sala.</div>
-    <div class="step" style="border-color:var(--green)"><b>3. Recuperación</b>Registra la salida y libera el quirófano.</div>
+    <div class="step"><b>1. Preparación</b>Primer escaneo: inicia Preparación. Segundo: inicio de profilaxis.</div>
+    <div class="step" style="border-color:var(--orange)"><b>2. Entrada de quirófano</b>Primer escaneo: ingresa al QF. Segundo: sale hacia Recuperación.</div>
+    <div class="step" style="border-color:var(--green)"><b>3. Dentro de quirófano</b>Primer escaneo: inicia procedimiento. Segundo: lo finaliza.</div>
+    <div class="step" style="border-color:var(--green)"><b>4. Recuperación</b>Da egreso y retira al paciente de la pantalla.</div>
 
     <label for="station">Paso que va a registrar</label>
     <select id="station" onchange="showRoom()">
-      <option value="PREPARACION">1. Preparación</option>
-      <option value="QUIROFANO">2. Entrada a quirófano</option>
-      <option value="RECUPERACION">3. Recuperación / salida de QF</option>
+      <option value="PREPARACION">1. Preparación / profilaxis</option>
+      <option value="ENTRADA_QFNO">2. Entrada o salida de quirófano</option>
+      <option value="DENTRO_QFNO">3. Dentro de quirófano: procedimiento</option>
+      <option value="RECUPERACION">4. Recuperación: egreso</option>
     </select>
+    <div id="room-config" class="hidden"><label for="room">Quirófano asignado a este lector</label><input id="room" autocomplete="off" placeholder="Ej. SAS 1 Torre 3"><p class="hint">El paciente debe estar programado en esta misma sala.</p></div>
     <label for="operator">Auxiliar / operador (opcional)</label>
     <input id="operator" autocomplete="name" placeholder="Nombre de quien escanea">
 
@@ -32,19 +35,26 @@
     <div id="manual" class="hidden"><label for="manual-code">Código de la manilla</label><input id="manual-code" autocomplete="off" placeholder="Escanee aquí con el lector"><button class="primary" onclick="sendManual()">Registrar lectura</button></div>
     <div id="reader" class="hidden"></div>
     <div id="message" class="warn">Toque “Activar cámara” para solicitar permiso.</div>
-    <p class="hint">Si el navegador bloqueó la cámara antes: abra el candado de la barra de dirección → Permisos → Cámara → Permitir; luego recargue esta página.</p>
+    <p class="hint">Para fijar un lector: agregue a la URL <b>?estacion=ENTRADA_QFNO&amp;quirofano=SAS%201%20Torre%203</b>. Si la base está ocupada, el lector reintenta automáticamente sin repetir el escaneo.</p>
     <div class="footer">Trazabilidad quirúrgica - QR de manilla</div>
   </main>
   <audio id="beep" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" preload="auto"></audio>
   <script>
     const GOOGLE_SCRIPT_URL='https://script.google.com/macros/s/AKfycbyLyxG23Ovo11cAT6cfQ9zfs204Vb4-MvlmIj2JO0Gyufqci-iS_-QRImpb5DQTq56OKg/exec';
-    let scanner=null, running=false, sending=false;
+    let scanner=null, running=false, sending=false,lastCode='',lastCodeAt=0;
     const el=id=>document.getElementById(id);
     function message(text,type){let box=el('message');box.textContent=text;box.className=type||''}
-    function showRoom(){}
+    function isQfStation(){return ['ENTRADA_QFNO','DENTRO_QFNO'].includes(el('station').value)}
+    function showRoom(){el('room-config').classList.toggle('hidden',!isQfStation())}
+    function cargarConfiguracion(){
+      let p=new URLSearchParams(location.search),estacion=p.get('estacion'),quirofano=p.get('quirofano');
+      if(estacion&&[...el('station').options].some(o=>o.value===estacion)){el('station').value=estacion;el('station').disabled=true}
+      if(quirofano){el('room').value=quirofano;el('room').readOnly=true}
+      showRoom();
+    }
     function toggleManual(){el('manual').classList.toggle('hidden');if(!el('manual').classList.contains('hidden'))el('manual-code').focus()}
     /* En el segundo paso Apps Script toma automáticamente el quirófano programado del paciente. */
-    function stationValue(){return el('station').value}
+    function stationValue(){let station=el('station').value,room=el('room').value.trim();if(isQfStation()){if(!room){message('Indique el quirófano asignado a este lector.','error');return ''}return station+':'+room}return station}
     function startCamera(){
       if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){message('Este navegador no permite cámara. Use Chrome actualizado o el lector físico.','error');return}
       if(!stationValue())return;
@@ -60,19 +70,36 @@
       });
     }
     function sendManual(){let code=el('manual-code').value.trim();if(code)sendCode(code);else message('Escanee o escriba el código de la manilla.','error')}
-    function sendCode(code){
-      let station=stationValue();if(!station||sending)return;sending=true;
-      if(scanner&&running){scanner.pause(true)}
-      el('beep').play().catch(()=>{});message('Registrando lectura…','warn');
-      const url=GOOGLE_SCRIPT_URL+'?qr='+encodeURIComponent(code)+'&estacion='+encodeURIComponent(station)+'&operador='+encodeURIComponent(el('operator').value.trim()||'Lector móvil');
-      fetch(url).then(r=>r.text()).then(text=>{
-        let result;try{result=JSON.parse(text)}catch(_){result={ok:false,mensaje:text}}
-        if(result.ok){message('✓ '+result.mensaje+' '+(result.hora?'Hora: '+result.hora:''),'ok');el('manual-code').value=''}
-        else message(result.mensaje||'No fue posible registrar la lectura.','error');
-      }).catch(()=>message('Error de conexión con la base de datos. Revise Internet e intente otra vez.','error')).finally(()=>{
-        setTimeout(()=>{sending=false;if(scanner&&running){scanner.resume().catch(()=>{})}},2200);
-      });
+    const esperar=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+    const esBloqueo=r=>/base ocupada|candado|bloqueo|espera/i.test(String((r&&r.mensaje)||''));
+    async function solicitarRegistro(url){
+      const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);
+      try{let response=await fetch(url,{cache:'no-store',signal:controller.signal});let text=await response.text();try{return JSON.parse(text)}catch(_){return {ok:false,mensaje:text||'La base no devolvió una respuesta válida.'}}}
+      finally{clearTimeout(timer)}
     }
+    async function sendCode(code){
+      let station=stationValue(),now=Date.now();
+      if(!station||sending)return;
+      if(code===lastCode&&now-lastCodeAt<3500){message('Lectura ya enviada. Espere un momento antes de repetirla.','warn');return}
+      sending=true;
+      if(scanner&&running){scanner.pause(true)}
+      el('beep').play().catch(()=>{});
+      const url=GOOGLE_SCRIPT_URL+'?qr='+encodeURIComponent(code)+'&estacion='+encodeURIComponent(station)+'&operador='+encodeURIComponent(el('operator').value.trim()||'Lector móvil')+'&_='+Date.now();
+      try{
+        let result=null;
+        for(let intento=0;intento<3;intento++){
+          message(intento?'Base ocupada; reintentando automáticamente…':'Registrando lectura…','warn');
+          try{result=await solicitarRegistro(url)}catch(_){result={ok:false,mensaje:'No fue posible conectar con la base de datos.'}}
+          if(result.ok||!esBloqueo(result))break;
+          await esperar(1100*(intento+1));
+        }
+        if(result&&result.ok){lastCode=code;lastCodeAt=Date.now();message('✓ '+result.mensaje+' '+(result.hora?'Hora: '+result.hora:''),'ok');el('manual-code').value=''}
+        else message((result&&result.mensaje)||'No fue posible registrar la lectura.','error');
+      }finally{
+        setTimeout(()=>{sending=false;if(scanner&&running){scanner.resume().catch(()=>{})}},1200);
+      }
+    }
+    cargarConfiguracion();
   </script>
 </body>
 </html>
