@@ -7,6 +7,7 @@
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <style>
     :root{--blue:#007bb5;--green:#099667;--orange:#e58b00;--red:#c93636;--ink:#253848;--bg:#edf4f7}*{box-sizing:border-box}body{font-family:Arial,sans-serif;margin:0;padding:20px;background:linear-gradient(135deg,#edf4f7,#dcecf3);color:var(--ink);min-height:100vh}.app{max-width:480px;margin:auto;background:#fff;padding:22px;border-radius:16px;box-shadow:0 7px 25px #17516b26}h1{font-size:22px;color:var(--blue);margin:0 0 6px;text-align:center}p{color:#5d7484;text-align:center;margin:0 0 20px;line-height:1.4}label{display:block;font-size:13px;font-weight:bold;color:#446072;margin:14px 0 6px}select,input,button{font:inherit;border-radius:8px;width:100%;padding:13px}select,input{border:1px solid #c3d5de;background:#fff}button{border:0;font-weight:bold;cursor:pointer;margin-top:14px}.primary{background:var(--blue);color:#fff}.secondary{background:#e7f4fa;color:#006b9f}.hidden{display:none}#reader{width:100%;margin:18px auto 0;border:2px solid #8bc5dc;border-radius:10px;overflow:hidden;background:white}#message{min-height:48px;margin-top:18px;text-align:center;font-weight:bold;line-height:1.4}.ok{color:var(--green)}.error{color:var(--red)}.warn{color:var(--orange)}.step{padding:10px;border-left:5px solid var(--blue);background:#f7fbfd;border-radius:5px;margin:8px 0;font-size:13px}.step b{display:block}.hint{font-size:12px;color:#68808e;text-align:left;margin-top:14px}.footer{font-size:11px;color:#8093a0;margin:18px 0 0;text-align:center}@media(max-width:400px){body{padding:10px}.app{padding:16px}}
+    .reader-modes{display:grid;grid-template-columns:1fr;gap:8px;margin-top:18px}.reader-modes button{margin:0;text-align:left;border:2px solid transparent}.reader-modes button[aria-pressed="true"]{border-color:var(--blue);background:#dff5fb;color:#005781}.reader-modes small{display:block;font-size:12px;font-weight:normal;margin-top:5px}button:disabled{opacity:.6;cursor:wait}input:focus-visible,button:focus-visible,select:focus-visible{outline:3px solid #39bcd0;outline-offset:2px}.usb-focus{padding:10px;border-radius:8px;background:#eaf8f4;color:#07674b;font-size:13px;line-height:1.4;margin-top:12px}
   </style>
 </head>
 <body>
@@ -26,15 +27,18 @@
       <option value="DENTRO_QFNO">3. Dentro de quirófano: procedimiento</option>
       <option value="RECUPERACION">4. Recuperación: egreso</option>
     </select>
-    <div id="room-config" class="hidden"><label for="room">Quirófano asignado a este lector</label><input id="room" autocomplete="off" placeholder="Ej. SAS 1 Torre 3"><p class="hint">El paciente debe estar programado en esta misma sala.</p></div>
+    <div id="room-config" class="hidden"><label for="room">Quirófano asignado a este lector</label><input id="room" autocomplete="off" placeholder="Ej. SAS 1 Torre 3"><p class="hint">Indique la sala donde está este lector. Para un hospitalizado sin sala, el primer ingreso registra esta sala.</p></div>
     <label for="operator">Auxiliar / operador (opcional)</label>
     <input id="operator" autocomplete="name" placeholder="Nombre de quien escanea">
 
-    <button id="camera-button" class="primary" onclick="startCamera()">Activar cámara y escanear</button>
-    <button class="secondary" onclick="toggleManual()">Usar lector físico / escribir código</button>
-    <div id="manual" class="hidden"><label for="manual-code">Código de la manilla</label><input id="manual-code" autocomplete="off" placeholder="Escanee aquí con el lector"><button class="primary" onclick="sendManual()">Registrar lectura</button></div>
+    <div class="reader-modes" role="group" aria-label="Forma de registrar la manilla">
+      <button id="usb-button" class="secondary" aria-pressed="false" onclick="seleccionarModo('usb')">Pistola USB · automático<small>Escanee y se registra. No necesita pulsar teclas ni botones.</small></button>
+      <button id="camera-button" class="secondary" aria-pressed="false" onclick="seleccionarModo('camara')">Cámara del celular<small>Apunte al QR: la cámara registra automáticamente.</small></button>
+      <button id="manual-button" class="secondary" aria-pressed="false" onclick="seleccionarModo('manual')">Escribir código · manual<small>Escriba o pegue el código y pulse Registrar lectura.</small></button>
+    </div>
+    <div id="manual" class="hidden"><label for="manual-code">Código de la manilla</label><input id="manual-code" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="input-hint" placeholder="Código completo del QR"><p id="input-hint" class="hint"></p><div id="usb-focus" class="usb-focus hidden" role="status"></div><button id="manual-submit" class="primary" onclick="sendManual()">Registrar lectura</button></div>
     <div id="reader" class="hidden"></div>
-    <div id="message" class="warn">Toque “Activar cámara” para solicitar permiso.</div>
+    <div id="message" class="warn" role="status" aria-live="polite">Seleccione la estación y elija pistola USB, cámara o registro manual.</div>
     <p class="hint">Para fijar un lector: agregue a la URL <b>?estacion=ENTRADA_QFNO&amp;quirofano=SAS%201%20Torre%203</b>. Si la base está ocupada, el lector reintenta automáticamente sin repetir el escaneo.</p>
     <div class="footer">Trazabilidad quirúrgica - QR de manilla</div>
   </main>
@@ -42,34 +46,79 @@
   <script>
     const GOOGLE_SCRIPT_URL='https://script.google.com/macros/s/AKfycbyLyxG23Ovo11cAT6cfQ9zfs204Vb4-MvlmIj2JO0Gyufqci-iS_-QRImpb5DQTq56OKg/exec';
     let scanner=null, running=false, sending=false,lastCode='',lastCodeAt=0;
+    let modoLectura='',cambiandoModo=false,estacionFija=false,salaFija=false;
     const el=id=>document.getElementById(id);
     function message(text,type){let box=el('message');box.textContent=text;box.className=type||''}
     function isQfStation(){return ['ENTRADA_QFNO','DENTRO_QFNO'].includes(el('station').value)}
     function showRoom(){el('room-config').classList.toggle('hidden',!isQfStation())}
     function cargarConfiguracion(){
       let p=new URLSearchParams(location.search),estacion=p.get('estacion'),quirofano=p.get('quirofano');
-      if(estacion&&[...el('station').options].some(o=>o.value===estacion)){el('station').value=estacion;el('station').disabled=true}
-      if(quirofano){el('room').value=quirofano;el('room').readOnly=true}
+      if(estacion&&[...el('station').options].some(o=>o.value===estacion)){el('station').value=estacion;estacionFija=true}
+      if(quirofano){el('room').value=quirofano;salaFija=true}
       showRoom();
+      actualizarControles();
+      if(['usb','manual'].includes(p.get('modo')))seleccionarModo(p.get('modo'));
     }
-    function toggleManual(){el('manual').classList.toggle('hidden');if(!el('manual').classList.contains('hidden'))el('manual-code').focus()}
-    /* En el segundo paso Apps Script toma automáticamente el quirófano programado del paciente. */
+    function actualizarControles(){
+      const ocupado=sending||cambiandoModo;
+      ['usb-button','camera-button','manual-button','manual-submit','operator'].forEach(id=>el(id).disabled=ocupado);
+      el('station').disabled=ocupado||estacionFija;
+      el('room').readOnly=ocupado||salaFija;
+      el('manual-code').readOnly=ocupado;
+      actualizarFocoUsb();
+    }
+    function actualizarFocoUsb(){
+      if(modoLectura!=='usb')return;
+      el('usb-focus').textContent=sending?'Guardando lectura. Espere la confirmación antes de escanear otra vez.':
+        document.activeElement===el('manual-code')?'Pistola lista: escanee la manilla, sin pulsar Enter.':
+        'Haga clic en Código de la manilla para dejar la pistola lista.';
+    }
+    async function seleccionarModo(modo){
+      if(!['usb','camara','manual'].includes(modo)||sending||cambiandoModo)return;
+      if(modo==='camara'&&running)return;
+      cambiandoModo=true;actualizarControles();
+      try{
+        if(scanner&&running){await scanner.stop();running=false;}
+        modoLectura=modo;
+        [['usb-button','usb'],['camera-button','camara'],['manual-button','manual']].forEach(([id,valor])=>el(id).setAttribute('aria-pressed',String(modo===valor)));
+        el('manual').classList.toggle('hidden',modo==='camara');
+        el('reader').classList.toggle('hidden',modo!=='camara');
+        el('manual-submit').classList.toggle('hidden',modo!=='manual');
+        el('usb-focus').classList.toggle('hidden',modo!=='usb');
+        el('manual-code').value='';
+        el('manual-code').setAttribute('inputmode',modo==='usb'?'none':'text');
+        el('manual-code').placeholder=modo==='usb'?'Escanee aquí: registro automático':'Escriba o pegue el código completo del QR';
+        el('input-hint').textContent=modo==='usb'?
+          'La pistola envía el cierre de lectura automáticamente. No pulse Enter ni Registrar; mantenga esta página activa y el cursor en este campo.':
+          'Escriba o pegue el código completo. Después pulse Registrar lectura o Enter.';
+        if(modo==='camara')await startCamera();
+        else message(modo==='usb'?'Pistola USB seleccionada. Cada lectura completa se envía automáticamente.':'Registro manual seleccionado. Escriba el código de la manilla.','warn');
+      }catch(error){message('No se pudo cambiar de lector: '+String(error.message||error),'error');}
+      finally{
+        cambiandoModo=false;actualizarControles();
+        if(modoLectura==='usb'||modoLectura==='manual')el('manual-code').focus();
+      }
+    }
+    /* La sala pertenece a la estación; en hospitalización se asigna en el primer ingreso. */
     function stationValue(){let station=el('station').value,room=el('room').value.trim();if(isQfStation()){if(!room){message('Indique el quirófano asignado a este lector.','error');return ''}return station+':'+room}return station}
-    function startCamera(){
+    async function startCamera(){
       if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){message('Este navegador no permite cámara. Use Chrome actualizado o el lector físico.','error');return}
+      if(typeof Html5Qrcode==='undefined'){message('No cargó el lector de cámara. Recargue la página o seleccione pistola USB.','error');return}
       if(!stationValue())return;
       el('reader').classList.remove('hidden'); message('Solicitando cámara trasera…','warn');
       if(scanner&&running)return;
       scanner=new Html5Qrcode('reader');
-      const success=code=>{if(!sending)sendCode(code)};
-      scanner.start({facingMode:{exact:'environment'}},{fps:10,qrbox:{width:230,height:230}},success,()=>{}).then(()=>{running=true;message('Apunte al código QR de la manilla.','warn')}).catch(()=>{
-        scanner.start({facingMode:'environment'},{fps:10,qrbox:{width:230,height:230}},success,()=>{}).then(()=>{running=true;message('Apunte al código QR de la manilla.','warn')}).catch(error=>{
-          let denied=String(error).includes('NotAllowedError')||String(error).toLowerCase().includes('permission');
-          message(denied?'La cámara fue bloqueada. Permítala en el candado de la dirección y recargue.':'No se pudo abrir la cámara: '+error,'error');
-        });
-      });
+      const success=code=>{if(modoLectura==='camara'&&!sending&&!cambiandoModo)sendCode(code)};
+      try{
+        try{await scanner.start({facingMode:{exact:'environment'}},{fps:10,qrbox:{width:230,height:230}},success,()=>{})}
+        catch(_){await scanner.start({facingMode:'environment'},{fps:10,qrbox:{width:230,height:230}},success,()=>{})}
+        running=true;message('Cámara lista. Apunte al QR; se registrará automáticamente.','warn');
+      }catch(error){
+        let denied=String(error).includes('NotAllowedError')||String(error).toLowerCase().includes('permission');
+        message(denied?'La cámara fue bloqueada. Permítala en el candado de la dirección y recargue.':'No se pudo abrir la cámara: '+error,'error');
+      }
     }
-    function sendManual(){let code=el('manual-code').value.trim();if(code)sendCode(code);else message('Escanee o escriba el código de la manilla.','error')}
+    function sendManual(){if(sending||cambiandoModo||!['usb','manual'].includes(modoLectura))return;let code=el('manual-code').value.trim();if(code)return sendCode(code);message('Escanee o escriba el código de la manilla.','error')}
     const esperar=ms=>new Promise(resolve=>setTimeout(resolve,ms));
     const esBloqueo=r=>/base ocupada|candado|bloqueo|espera/i.test(String((r&&r.mensaje)||''));
     async function solicitarRegistro(url){
@@ -79,12 +128,18 @@
     }
     async function sendCode(code){
       let station=stationValue(),now=Date.now();
-      if(!station||sending)return;
-      if(code===lastCode&&now-lastCodeAt<3500){message('Lectura ya enviada. Espere un momento antes de repetirla.','warn');return}
+      if(!station||sending||cambiandoModo)return;
+      if(code===lastCode&&now-lastCodeAt<3500){
+        if(el('manual-code').value.trim()===code)el('manual-code').value='';
+        message('Lectura ya enviada. Espere un momento antes de repetirla.','warn');return;
+      }
       sending=true;
-      if(scanner&&running){scanner.pause(true)}
-      el('beep').play().catch(()=>{});
-      const url=GOOGLE_SCRIPT_URL+'?qr='+encodeURIComponent(code)+'&estacion='+encodeURIComponent(station)+'&operador='+encodeURIComponent(el('operator').value.trim()||'Lector móvil')+'&_='+Date.now();
+      actualizarControles();
+      let camaraPausada=false;
+      if(scanner&&running){try{scanner.pause(true);camaraPausada=true}catch(_){}}
+      try{const sonido=el('beep').play();if(sonido)sonido.catch(()=>{})}catch(_){}
+      const operador=el('operator').value.trim()||({usb:'Pistola USB',camara:'Lector móvil',manual:'Registro manual'}[modoLectura]);
+      const url=GOOGLE_SCRIPT_URL+'?qr='+encodeURIComponent(code)+'&estacion='+encodeURIComponent(station)+'&operador='+encodeURIComponent(operador)+'&_='+Date.now();
       try{
         let result=null;
         for(let intento=0;intento<3;intento++){
@@ -96,9 +151,24 @@
         if(result&&result.ok){lastCode=code;lastCodeAt=Date.now();message('✓ '+result.mensaje+' '+(result.hora?'Hora: '+result.hora:''),'ok');el('manual-code').value=''}
         else message((result&&result.mensaje)||'No fue posible registrar la lectura.','error');
       }finally{
-        setTimeout(()=>{sending=false;if(scanner&&running){scanner.resume().catch(()=>{})}},1200);
+        setTimeout(()=>{
+          sending=false;
+          actualizarControles();
+          if(!el('manual').classList.contains('hidden')&&[document.body,el('manual-code'),el('manual-submit')].includes(document.activeElement)){
+            el('manual-code').focus();
+            if(el('manual-code').value)el('manual-code').select();
+          }
+          if(scanner&&running&&camaraPausada&&modoLectura==='camara'){try{scanner.resume()}catch(_){message('La cámara quedó pausada. Seleccione otro modo y vuelva a Cámara del celular.','error')}}
+        },1200);
       }
     }
+    el('manual-code').addEventListener('keydown',event=>{
+      if(event.key!=='Enter')return;
+      event.preventDefault();
+      if(!event.repeat&&!sending&&!cambiandoModo&&el('manual-code').value.trim())sendManual();
+    });
+    el('manual-code').addEventListener('focus',actualizarFocoUsb);
+    el('manual-code').addEventListener('blur',actualizarFocoUsb);
     cargarConfiguracion();
   </script>
 </body>
