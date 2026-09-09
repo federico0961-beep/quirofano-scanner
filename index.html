@@ -7,12 +7,13 @@
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <style>
     :root{--blue:#007bb5;--green:#099667;--orange:#e58b00;--red:#c93636;--ink:#253848;--bg:#edf4f7}*{box-sizing:border-box}body{font-family:Arial,sans-serif;margin:0;padding:20px;background:linear-gradient(135deg,#edf4f7,#dcecf3);color:var(--ink);min-height:100vh}.app{max-width:480px;margin:auto;background:#fff;padding:22px;border-radius:16px;box-shadow:0 7px 25px #17516b26}h1{font-size:22px;color:var(--blue);margin:0 0 6px;text-align:center}p{color:#5d7484;text-align:center;margin:0 0 20px;line-height:1.4}label{display:block;font-size:13px;font-weight:bold;color:#446072;margin:14px 0 6px}select,input,button{font:inherit;border-radius:8px;width:100%;padding:13px}select,input{border:1px solid #c3d5de;background:#fff}button{border:0;font-weight:bold;cursor:pointer;margin-top:14px}.primary{background:var(--blue);color:#fff}.secondary{background:#e7f4fa;color:#006b9f}.hidden{display:none}#reader{width:100%;margin:18px auto 0;border:2px solid #8bc5dc;border-radius:10px;overflow:hidden;background:white}#message{min-height:48px;margin-top:18px;text-align:center;font-weight:bold;line-height:1.4}.ok{color:var(--green)}.error{color:var(--red)}.warn{color:var(--orange)}.step{padding:10px;border-left:5px solid var(--blue);background:#f7fbfd;border-radius:5px;margin:8px 0;font-size:13px}.step b{display:block}.hint{font-size:12px;color:#68808e;text-align:left;margin-top:14px}.footer{font-size:11px;color:#8093a0;margin:18px 0 0;text-align:center}@media(max-width:400px){body{padding:10px}.app{padding:16px}}
-    .reader-modes{display:grid;grid-template-columns:1fr;gap:8px;margin-top:18px}.reader-modes button{margin:0;text-align:left;border:2px solid transparent}.reader-modes button[aria-pressed="true"]{border-color:var(--blue);background:#dff5fb;color:#005781}.reader-modes small{display:block;font-size:12px;font-weight:normal;margin-top:5px}button:disabled{opacity:.6;cursor:wait}input:focus-visible,button:focus-visible,select:focus-visible{outline:3px solid #39bcd0;outline-offset:2px}.usb-focus{padding:10px;border-radius:8px;background:#eaf8f4;color:#07674b;font-size:13px;line-height:1.4;margin-top:12px}
+    .reader-modes{display:grid;grid-template-columns:1fr;gap:8px;margin-top:18px}.reader-modes button{margin:0;text-align:left;border:2px solid transparent}.reader-modes button[aria-pressed="true"]{border-color:var(--blue);background:#dff5fb;color:#005781}.reader-modes small{display:block;font-size:12px;font-weight:normal;margin-top:5px}button:disabled{opacity:.6;cursor:wait}input:focus-visible,button:focus-visible,select:focus-visible{outline:3px solid #39bcd0;outline-offset:2px}.usb-focus{padding:10px;border-radius:8px;background:#eaf8f4;color:#07674b;font-size:13px;line-height:1.4;margin-top:12px}.version{font-size:12px;font-weight:bold;color:#006b9f;margin:0 0 14px;text-align:center}
   </style>
 </head>
 <body>
   <main class="app">
     <h1>Escáner quirúrgico</h1>
+    <div class="version">Versión USB-3 · Pistola + celular + manual</div>
     <p>Configure la estación de este lector una vez y escanee la manilla. La hora queda registrada automáticamente.</p>
 
     <div class="step"><b>1. Preparación</b>Primer escaneo: inicia Preparación. Segundo: inicio de profilaxis.</div>
@@ -39,6 +40,7 @@
     <div id="manual" class="hidden"><label for="manual-code">Código de la manilla</label><input id="manual-code" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="input-hint" placeholder="Código completo del QR"><p id="input-hint" class="hint"></p><div id="usb-focus" class="usb-focus hidden" role="status"></div><button id="manual-submit" class="primary" onclick="sendManual()">Registrar lectura</button></div>
     <div id="reader" class="hidden"></div>
     <div id="message" class="warn" role="status" aria-live="polite">Seleccione la estación y elija pistola USB, cámara o registro manual.</div>
+    <p id="detalle-lectura" class="hint hidden" role="status"></p>
     <p class="hint">Para fijar un lector: agregue a la URL <b>?estacion=ENTRADA_QFNO&amp;quirofano=SAS%201%20Torre%203</b>. Si la base está ocupada, el lector reintenta automáticamente sin repetir el escaneo.</p>
     <div class="footer">Trazabilidad quirúrgica - QR de manilla</div>
   </main>
@@ -86,6 +88,8 @@
         el('manual-submit').classList.toggle('hidden',modo!=='manual');
         el('usb-focus').classList.toggle('hidden',modo!=='usb');
         el('manual-code').value='';
+        el('detalle-lectura').textContent='';
+        el('detalle-lectura').classList.add('hidden');
         el('manual-code').setAttribute('inputmode',modo==='usb'?'none':'text');
         el('manual-code').placeholder=modo==='usb'?'Escanee aquí: registro automático':'Escriba o pegue el código completo del QR';
         el('input-hint').textContent=modo==='usb'?
@@ -119,6 +123,13 @@
       }
     }
     function sendManual(){if(sending||cambiandoModo||!['usb','manual'].includes(modoLectura))return;let code=el('manual-code').value.trim();if(code)return sendCode(code);message('Escanee o escriba el código de la manilla.','error')}
+    function normalizarCodigoLeido(valor){
+      const codigo=String(valor==null?'':valor).trim();
+      /* Algunos lectores de teclado omiten |. Solo se repone cuando hay prefijo
+         conocido y UUID completo; nunca se adivinan caracteres del identificador. */
+      const sinSeparador=codigo.match(/^(QF|MG)([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
+      return sinSeparador?sinSeparador[1].toUpperCase()+'|'+sinSeparador[2]:codigo;
+    }
     const esperar=ms=>new Promise(resolve=>setTimeout(resolve,ms));
     const esBloqueo=r=>/base ocupada|candado|bloqueo|espera/i.test(String((r&&r.mensaje)||''));
     async function solicitarRegistro(url){
@@ -129,6 +140,12 @@
     async function sendCode(code){
       let station=stationValue(),now=Date.now();
       if(!station||sending||cambiandoModo)return;
+      const recibido=String(code==null?'':code).trim();
+      code=normalizarCodigoLeido(recibido);
+      if(!code){message('Escanee o escriba el código de la manilla.','error');return;}
+      el('detalle-lectura').textContent=code!==recibido?'Se repuso la barra | después de '+code.slice(0,2)+'. El identificador de la manilla se conserva completo.':'';
+      el('detalle-lectura').classList.toggle('hidden',code===recibido);
+      if(el('manual-code').value.trim()===recibido)el('manual-code').value=code;
       if(code===lastCode&&now-lastCodeAt<3500){
         if(el('manual-code').value.trim()===code)el('manual-code').value='';
         message('Lectura ya enviada. Espere un momento antes de repetirla.','warn');return;
