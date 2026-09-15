@@ -13,20 +13,18 @@
 <body>
   <main class="app">
     <h1>Escáner quirúrgico</h1>
-    <div class="version">Versión USB-4 · Pistola + celular + manual</div>
+    <div class="version">Versión USB-5 · 12 lectores fijos</div>
     <p>Configure la estación de este lector una vez y escanee la manilla. La hora queda registrada automáticamente.</p>
 
     <div class="step"><b>1. Preparación</b>Primer escaneo: inicia Preparación. Segundo: inicio de profilaxis.</div>
-    <div class="step" style="border-color:var(--orange)"><b>2. Entrada de quirófano</b>Primer escaneo: ingresa al QF. Segundo: sale hacia Recuperación.</div>
-    <div class="step" style="border-color:var(--green)"><b>3. Dentro de quirófano</b>Primer escaneo: inicia procedimiento. Segundo: lo finaliza.</div>
-    <div class="step" style="border-color:var(--green)"><b>4. Recuperación</b>Da egreso y retira al paciente de la pantalla.</div>
+    <div class="step" style="border-color:var(--green)"><b>2. Quirófano</b>La misma pistola registra, en orden: ingreso, inicio, fin y salida hacia Recuperación.</div>
+    <div class="step" style="border-color:var(--orange)"><b>3. Recuperación</b>Da egreso y retira al paciente de la pantalla.</div>
 
     <label for="station">Paso que va a registrar</label>
     <select id="station" onchange="showRoom()">
       <option value="PREPARACION">1. Preparación / profilaxis</option>
-      <option value="ENTRADA_QFNO">2. Entrada o salida de quirófano</option>
-      <option value="DENTRO_QFNO">3. Dentro de quirófano: procedimiento</option>
-      <option value="RECUPERACION">4. Recuperación: egreso</option>
+      <option value="QUIROFANO">2. Quirófano: ingreso, procedimiento y salida</option>
+      <option value="RECUPERACION">3. Recuperación: egreso</option>
     </select>
     <div id="room-config" class="hidden"><label for="room">Quirófano asignado a este lector</label><input id="room" autocomplete="off" placeholder="Ej. SAS 1 Torre 3"><p class="hint">Indique la sala donde está este lector. Para un hospitalizado sin sala, el primer ingreso registra esta sala.</p></div>
     <label for="operator">Auxiliar / operador (opcional)</label>
@@ -41,7 +39,7 @@
     <div id="reader" class="hidden"></div>
     <div id="message" class="warn" role="status" aria-live="polite">Seleccione la estación y elija pistola USB, cámara o registro manual.</div>
     <p id="detalle-lectura" class="hint hidden" role="status"></p>
-    <p class="hint">Para fijar un lector: agregue a la URL <b>?estacion=ENTRADA_QFNO&amp;quirofano=SAS%201%20Torre%203</b>. Si la base está ocupada, el lector reintenta automáticamente sin repetir el escaneo.</p>
+    <p class="hint">Para fijar un lector de quirófano: agregue a la URL <b>?modo=usb&amp;estacion=QUIROFANO&amp;quirofano=SAS%201%20Torre%203</b>. Si la base está ocupada, el lector reintenta automáticamente sin repetir el escaneo.</p>
     <div class="footer">Trazabilidad quirúrgica - QR de manilla</div>
   </main>
   <audio id="beep" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" preload="auto"></audio>
@@ -52,7 +50,7 @@
     let modoLectura='',cambiandoModo=false,estacionFija=false,salaFija=false;
     const el=id=>document.getElementById(id);
     function message(text,type){let box=el('message');box.textContent=text;box.className=type||''}
-    function isQfStation(){return ['ENTRADA_QFNO','DENTRO_QFNO'].includes(el('station').value)}
+    function isQfStation(){return ['QUIROFANO','ENTRADA_QFNO','DENTRO_QFNO'].includes(el('station').value)}
     function showRoom(){el('room-config').classList.toggle('hidden',!isQfStation())}
     function cargarConfiguracion(){
       let p=new URLSearchParams(location.search),estacion=p.get('estacion'),quirofano=p.get('quirofano');
