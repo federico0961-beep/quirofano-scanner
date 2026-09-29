@@ -13,7 +13,7 @@
 <body>
   <main class="app">
     <h1>Escáner quirúrgico</h1>
-    <div class="version">Versión USB-5 · 12 lectores fijos</div>
+    <div class="version">Versión USB-6 · conexión verificable</div>
     <p>Configure la estación de este lector una vez y escanee la manilla. La hora queda registrada automáticamente.</p>
 
     <div class="step"><b>1. Preparación</b>Primer escaneo: inicia Preparación. Segundo: inicio de profilaxis.</div>
@@ -38,22 +38,48 @@
     <div id="manual" class="hidden"><label for="manual-code">Código de la manilla</label><input id="manual-code" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="input-hint" placeholder="Código completo del QR"><p id="input-hint" class="hint"></p><div id="usb-focus" class="usb-focus hidden" role="status"></div><button id="manual-submit" class="primary" onclick="sendManual()">Registrar lectura</button></div>
     <div id="reader" class="hidden"></div>
     <div id="message" class="warn" role="status" aria-live="polite">Seleccione la estación y elija pistola USB, cámara o registro manual.</div>
+    <details class="step" id="server-config" style="margin-top:14px"><summary style="cursor:pointer;font-weight:bold">Conexión con la aplicación</summary><label for="app-url">Enlace /exec de Apps Script</label><input id="app-url" type="url" autocomplete="off" spellcheck="false" placeholder="https://script.google.com/macros/s/.../exec"><button class="secondary" type="button" onclick="guardarServidor()">Guardar y comprobar conexión</button><div id="server-status" class="hint" role="status">Comprobando conexión…</div></details>
     <p id="detalle-lectura" class="hint hidden" role="status"></p>
     <p class="hint">Para fijar un lector de quirófano: agregue a la URL <b>?modo=usb&amp;estacion=QUIROFANO&amp;quirofano=SAS%201%20Torre%203</b>. Si la base está ocupada, el lector reintenta automáticamente sin repetir el escaneo.</p>
     <div class="footer">Trazabilidad quirúrgica - QR de manilla</div>
   </main>
   <audio id="beep" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" preload="auto"></audio>
   <script>
-    const GOOGLE_SCRIPT_URL='https://script.google.com/macros/s/AKfycbyLyxG23Ovo11cAT6cfQ9zfs204Vb4-MvlmIj2JO0Gyufqci-iS_-QRImpb5DQTq56OKg/exec';
+    const URL_PREDERMINADA='https://script.google.com/macros/s/AKfycbyLyxG23Ovo11cAT6cfQ9zfs204Vb4-MvlmIj2JO0Gyufqci-iS_-QRImpb5DQTq56OKg/exec';
+    const CLAVE_SERVIDOR='quirofanoScannerAppUrlV1';
+    let urlAplicacion=URL_PREDERMINADA,baseEsperada='',baseComprobada='';
     let scanner=null, running=false, lastCode='',lastCodeAt=0,pendingCode='',pendingUntil=0;
     let sending=false;
     let modoLectura='',cambiandoModo=false,estacionFija=false,salaFija=false;
     const el=id=>document.getElementById(id);
+    function urlServidorValida(valor){try{const u=new URL(valor);return u.protocol==='https:'&&u.hostname==='script.google.com'&&/^\/(?:a\/[^/]+\/)?macros\/s\/[^/]+\/exec$/.test(u.pathname)}catch(_){return false}}
+    function guardarServidor(){
+      const valor=el('app-url').value.trim();
+      if(!urlServidorValida(valor)){el('server-status').textContent='Use el enlace completo /exec de esta aplicación.';return}
+      urlAplicacion=valor;try{localStorage.setItem(CLAVE_SERVIDOR,valor)}catch(_){}
+      comprobarServidor();
+    }
+    async function comprobarServidor(){
+      el('server-status').textContent='Comprobando conexión…';
+      try{
+        const r=await solicitarRegistro(urlAplicacion+'?accion=estadoLector&_='+Date.now(),true);
+        if(!r||r.tipo!=='ESTADO_LECTOR'||!r.ok)throw new Error('Este despliegue no tiene la versión necesaria para comprobar manillas genéricas.');
+        baseComprobada=r.base;
+        if(baseEsperada&&baseEsperada!==r.base)throw new Error('El lector apunta a otra base. Ábralo desde el módulo de Hospitalización.');
+        el('server-status').textContent='Conectado a la base '+r.base+' · '+urlAplicacion;
+      }catch(error){baseComprobada='';el('server-status').textContent='Conexión pendiente: '+String(error.message||error)+' Revise el enlace y despliegue la versión nueva.'}
+    }
     function message(text,type){let box=el('message');box.textContent=text;box.className=type||''}
     function isQfStation(){return ['QUIROFANO','ENTRADA_QFNO','DENTRO_QFNO'].includes(el('station').value)}
     function showRoom(){el('room-config').classList.toggle('hidden',!isQfStation())}
     function cargarConfiguracion(){
       let p=new URLSearchParams(location.search),estacion=p.get('estacion'),quirofano=p.get('quirofano');
+      baseEsperada=p.get('base')||'';
+      const enlace=p.get('app');
+      if(enlace&&urlServidorValida(enlace)){urlAplicacion=enlace;try{localStorage.setItem(CLAVE_SERVIDOR,enlace)}catch(_){}}
+      else{try{const guardada=localStorage.getItem(CLAVE_SERVIDOR);if(guardada&&urlServidorValida(guardada))urlAplicacion=guardada}catch(_){}}
+      el('app-url').value=urlAplicacion;
+      comprobarServidor();
       if(estacion&&[...el('station').options].some(o=>o.value===estacion)){el('station').value=estacion;estacionFija=true}
       if(quirofano){el('room').value=quirofano;salaFija=true}
       showRoom();
@@ -131,10 +157,10 @@
     }
     const esperar=ms=>new Promise(resolve=>setTimeout(resolve,ms));
     const esBloqueo=r=>/base ocupada|candado|bloqueo|espera/i.test(String((r&&r.mensaje)||''));
-    async function solicitarRegistro(url){
+    async function solicitarRegistro(url,silencioso){
       const controller=new AbortController(); let agotado=false;
-      const avisoLento=setTimeout(()=>message('Guardando lectura… Espere la confirmación; no escanee esta manilla otra vez.','warn'),9000);
-      const timer=setTimeout(()=>{agotado=true;controller.abort()},45000);
+      const avisoLento=silencioso?null:setTimeout(()=>message('Guardando lectura… Espere la confirmación; no escanee esta manilla otra vez.','warn'),9000);
+      const timer=setTimeout(()=>{agotado=true;controller.abort()},silencioso?15000:45000);
       try{
         const response=await fetch(url,{cache:'no-store',signal:controller.signal});
         const text=await response.text();
@@ -161,13 +187,14 @@
         if(el('manual-code').value.trim()===code)el('manual-code').value='';
         message('Lectura ya enviada. Espere un momento antes de repetirla.','warn');return;
       }
+      if(!baseComprobada){message('Compruebe primero la conexión con esta aplicación en «Conexión con la aplicación».','error');return;}
       sending=true;
       actualizarControles();
       let camaraPausada=false;
       if(scanner&&running){try{scanner.pause(true);camaraPausada=true}catch(_){}}
       try{const sonido=el('beep').play();if(sonido)sonido.catch(()=>{})}catch(_){}
       const operador=el('operator').value.trim()||({usb:'Pistola USB',camara:'Lector móvil',manual:'Registro manual'}[modoLectura]);
-      const url=GOOGLE_SCRIPT_URL+'?qr='+encodeURIComponent(code)+'&estacion='+encodeURIComponent(station)+'&operador='+encodeURIComponent(operador)+'&_='+Date.now();
+      const url=urlAplicacion+'?qr='+encodeURIComponent(code)+'&estacion='+encodeURIComponent(station)+'&operador='+encodeURIComponent(operador)+'&_='+Date.now();
       try{
         let result=null;
         for(let intento=0;intento<3;intento++){
@@ -183,7 +210,17 @@
           pendingCode=code;pendingUntil=Date.now()+60000;el('manual-code').value='';
           message('La lectura fue enviada, pero la base tardó en confirmar. Revise Seguimiento antes de escanear esta misma manilla otra vez.','warn');
         }
-        else message((result&&result.mensaje)||'No fue posible registrar la lectura.','error');
+        else {
+          message((result&&result.mensaje)||'No fue posible registrar la lectura.','error');
+          if(/^MG\|/i.test(code)&&result&&/no está asignada/i.test(result.mensaje||'')){
+            try{const verificacion=await solicitarRegistro(urlAplicacion+'?accion=verificarManilla&qr='+encodeURIComponent(code)+'&_='+Date.now(),true);
+              if(verificacion&&verificacion.tipo==='VERIFICACION_MANILLA')el('detalle-lectura').textContent=verificacion.existe
+                ?'Base '+verificacion.base+': la manilla existe, pero aquí no figura asignada. Abra el lector desde Hospitalización y compruebe la asignación.'
+                :'Base '+verificacion.base+': este QR no existe en esta base. Revise que el lector use la misma aplicación donde asignó la manilla.';
+              el('detalle-lectura').classList.remove('hidden');
+            }catch(_){}
+          }
+        }
       }finally{
         setTimeout(()=>{
           sending=false;
