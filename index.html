@@ -13,7 +13,7 @@
 <body>
   <main class="app">
     <h1>Escáner quirúrgico</h1>
-    <div class="version">Versión USB-8 · comprobación de manilla asignada</div>
+    <div class="version">Versión USB-9 · validación de QR y duplicados</div>
     <p>Configure la estación de este lector una vez y escanee la manilla. La hora queda registrada automáticamente.</p>
 
     <div class="step"><b>1. Preparación</b>Primer escaneo: inicia Preparación. Segundo: inicio de profilaxis.</div>
@@ -232,7 +232,8 @@
           if(/^MG\|/i.test(code)&&result&&(/no está asignada/i.test(result.mensaje||'')||result.codigo==='MANILLA_GENERICA_SIN_ASIGNACION')){
             try{const verificacion=await solicitarRegistro(urlAplicacion+'?accion=verificarManilla&qr='+encodeURIComponent(code)+'&_='+Date.now(),true);
               if(verificacion&&verificacion.tipo==='VERIFICACION_MANILLA'){
-                if(verificacion.base!==baseComprobada)el('detalle-lectura').textContent='La base cambió durante la lectura. Compruebe la conexión antes de continuar.';
+                if(!verificacion.ok)el('detalle-lectura').textContent=verificacion.mensaje||'No se pudo verificar la asignación. No se registró ninguna lectura adicional.';
+                else if(verificacion.base!==baseComprobada)el('detalle-lectura').textContent='La base cambió durante la lectura. Compruebe la conexión antes de continuar.';
                 else if(!verificacion.existe)el('detalle-lectura').textContent='Base '+verificacion.base+': este QR no existe. '+(baseEsperada===verificacion.base?'La base sí coincide con Hospitalización; compare el QR impreso con el QR asignado, puede ser otra manilla o una impresión anterior.':'Abra el lector desde Hospitalización y compare el QR físico con el QR asignado.');
                 else if(verificacion.asignada)el('detalle-lectura').textContent='La asignación existe en esta base. No asigne otra manilla: actualice el despliegue del servidor y revise el vínculo de esta cirugía.';
                 else el('detalle-lectura').textContent='Base '+verificacion.base+': el QR existe, pero no tiene asignación activa. Compruebe Hospitalización.';
